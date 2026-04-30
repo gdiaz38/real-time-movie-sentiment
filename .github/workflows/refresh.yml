@@ -2,8 +2,11 @@ name: Daily Data Refresh
 
 on:
   schedule:
-    - cron: '0 12 * * *'   # noon UTC every day
-  workflow_dispatch:         # lets you trigger manually from GitHub UI
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   refresh:
@@ -11,6 +14,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-python@v5
         with:
@@ -21,9 +26,12 @@ jobs:
 
       - name: Run pipeline
         env:
-          TMDB_API_KEY:          ${{ secrets.TMDB_API_KEY }}
-          OMDB_API_KEY:          ${{ secrets.OMDB_API_KEY }}
-          YOUTUBE_API_KEY:       ${{ secrets.YOUTUBE_API_KEY }}
+          TMDB_API_KEY:         ${{ secrets.TMDB_API_KEY }}
+          OMDB_API_KEY:         ${{ secrets.OMDB_API_KEY }}
+          YOUTUBE_API_KEY:      ${{ secrets.YOUTUBE_API_KEY }}
+          REDDIT_CLIENT_ID:     ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USER_AGENT:    ${{ secrets.REDDIT_USER_AGENT }}
         run: |
           cd scripts
           python3 pipeline.py
