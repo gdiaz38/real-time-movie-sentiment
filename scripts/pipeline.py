@@ -5,15 +5,18 @@ from fetch_omdb import get_omdb_scores
 from fetch_youtube import find_trailer, get_trailer_comments
 from sentiment import score_sentiment
 
-# Use absolute paths so it saves to the root 'data' folder
-# This finds the directory of pipeline.py, then goes up one level
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "movies.csv")
+
+def load_existing():
+    """Load existing CSV to preserve sentiment scores we already fetched."""
+    if os.path.exists(DATA_PATH):
+        return pd.read_csv(DATA_PATH).set_index("title")
+    return pd.DataFrame()
 
 def run():
     print(f"\n🎬 Pipeline started at {datetime.now()}")
-    movies_raw = get_now_playing(pages=2)  # ~40 movies
+    existing = load_existing()
+    movies_raw = get_now_playing(pages=2)
     rows = []
 
     for i, m in enumerate(movies_raw):
@@ -21,47 +24,59 @@ def run():
         year  = m["release_date"][:4] if m.get("release_date") else None
         print(f"  [{i+1}/{len(movies_raw)}] Processing: {title}")
 
-        # TMDB reviews sentiment
-        tmdb_reviews = get_tmdb_reviews(m["id"])
+        # ── Reuse existing YouTube sentiment if already scored ────────────────
+        prev = existing.loc[title] if title in existing.index else None
+        already_has_sentiment = (
+            prev is not None
+            and pd.notna(prev.get("audience_positive"))
+            and int(prev.get("audience_samples", 0)) > 0
+        )
+
+        if already_has_sentiment:
+            print(f"    ↩ Using cached sentiment ({int(prev['audience_samples'])} samples)")
+            yt_sentiment = {
+                "positive_pct":  prev["audience_positive"],
+                "avg_polarity":  prev.get("audience_polarity"),
+                "sample_size":   int(prev["audience_samples"])
+            }
+        else:
+            vid_id    = find_trailer(title, year)
+            yt_comments = get_trailer_comments(vid_id) if vid_id else []
+            yt_sentiment = score_sentiment([c["text"] for c in yt_comments])
+            if yt_sentiment["sample_size"] == 0:
+                print(f"    ⚠ YouTube returned 0 comments (quota hit or no trailer)")
+
+        # ── Always re-fetch critic scores (cheap API calls) ───────────────────
+        tmdb_reviews   = get_tmdb_reviews(m["id"])
         tmdb_sentiment = score_sentiment(tmdb_reviews)
-
-        # OMDb critic scores
-        omdb = get_omdb_scores(title, year) or {}
-
-        # YouTube trailer comment sentiment
-        vid_id = find_trailer(title, year)
-        yt_comments = get_trailer_comments(vid_id) if vid_id else []
-        yt_sentiment = score_sentiment([c["text"] for c in yt_comments])
+        omdb           = get_omdb_scores(title, year) or {}
 
         rows.append({
-            "title":              title,
-            "release_date":       m.get("release_date"),
-            "tmdb_score":         m.get("vote_average"),
-            "tmdb_votes":         m.get("vote_count"),
-            "rt_score":           omdb.get("rt_score"),
-            "metacritic":         omdb.get("metacritic"),
-            "imdb_rating":        omdb.get("imdb_rating"),
-            "box_office":         omdb.get("box_office"),
-            "audience_positive":  yt_sentiment.get("positive_pct", 0),
-            "audience_polarity":  yt_sentiment.get("avg_polarity", 0),
-            "audience_samples":   yt_sentiment.get("sample_size", 0),
-            "review_positive":    tmdb_sentiment.get("positive_pct", 0),
-            "review_polarity":    tmdb_sentiment.get("avg_polarity", 0),
-            "fetched_at":         datetime.utcnow().isoformat()
+            "title":             title,
+            "release_date":      m.get("release_date"),
+            "tmdb_score":        m.get("vote_average"),
+            "tmdb_votes":        m.get("vote_count"),
+            "rt_score":          omdb.get("rt_score"),
+            "metacritic":        omdb.get("metacritic"),
+            "imdb_rating":       omdb.get("imdb_rating"),
+            "box_office":        omdb.get("box_office"),
+            "audience_positive": yt_sentiment.get("positive_pct"),
+            "audience_polarity": yt_sentiment.get("avg_polarity"),
+            "audience_samples":  yt_sentiment.get("sample_size", 0),
+            "review_positive":   tmdb_sentiment.get("positive_pct"),
+            "review_polarity":   tmdb_sentiment.get("avg_polarity"),
+            "fetched_at":        datetime.utcnow().isoformat()
         })
 
-        time.sleep(0.3)  # be polite to APIs
+        time.sleep(0.3)
 
     df = pd.DataFrame(rows)
-    
-    # Create the data folder in the project root
-    os.makedirs(DATA_DIR, exist_ok=True)
-    file_path = os.path.join(DATA_DIR, "movies.csv")
-    
-    df.to_csv(file_path, index=False)
-    print(f"\n✅ Saved {len(df)} movies to {file_path}")
+    os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
+    df.to_csv(DATA_PATH, index=False)
+
+    good = df["audience_positive"].notna().sum()
+    print(f"\n✅ Saved {len(df)} movies → {good} with audience sentiment")
     print(df[["title","tmdb_score","rt_score","audience_positive"]].to_string())
 
 if __name__ == "__main__":
     run()
-

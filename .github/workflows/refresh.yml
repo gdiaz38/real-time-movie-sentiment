@@ -36,6 +36,19 @@ jobs:
           cd scripts
           python3 pipeline.py
 
+      - name: Validate before commit
+        run: |
+          python3 - << 'PYEOF'
+          import pandas as pd, sys
+          df = pd.read_csv("data/movies.csv")
+          sentiment_count = df["audience_positive"].notna().sum()
+          print(f"Sentiment rows: {sentiment_count}")
+          if sentiment_count == 0:
+              print("❌ Zero sentiment scores — likely quota hit. Aborting commit.")
+              sys.exit(1)
+          print("✅ Data looks good, proceeding with commit.")
+          PYEOF
+
       - name: Commit updated data
         run: |
           git config --global user.email "actions@github.com"
