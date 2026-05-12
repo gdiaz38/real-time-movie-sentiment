@@ -25,19 +25,25 @@ def run():
         print(f"  [{i+1}/{len(movies_raw)}] Processing: {title}")
 
         # ── Reuse existing YouTube sentiment if already scored ────────────────
+        # 1. Get the data from the index
         prev = existing.loc[title] if title in existing.index else None
         
         already_has_sentiment = False
-        if prev is not None:
-            # Handle potential duplicate titles returning a DataFrame
+        
+        # 2. Check if we actually found something without using 'is not None' on the object
+        already_has_sentiment = False
+        
+        if title in existing.index:
+            prev = existing.loc[title]
+            # Handle duplicate titles by taking the first row
             target_row = prev.iloc[0] if isinstance(prev, pd.DataFrame) else prev
             
-            already_has_sentiment = (
-                pd.notna(target_row.get("audience_positive"))
-                and int(target_row.get("audience_samples", 0)) > 0
-            )
-            # Re-assign prev to the single row for the cached logic below
-            prev = target_row
+            has_pos = pd.notna(target_row.get("audience_positive"))
+            has_samples = int(target_row.get("audience_samples", 0)) > 0
+            
+            if has_pos and has_samples:
+                already_has_sentiment = True
+                prev = target_row 
 
         if already_has_sentiment:
             print(f"    ↩ Using cached sentiment ({int(prev['audience_samples'])} samples)")
@@ -46,6 +52,7 @@ def run():
                 "avg_polarity":  prev.get("audience_polarity"),
                 "sample_size":   int(prev["audience_samples"])
             }
+    
         else:
             vid_id    = find_trailer(title, year)
             yt_comments = get_trailer_comments(vid_id) if vid_id else []
