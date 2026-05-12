@@ -10,7 +10,8 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "movies.csv")
 def load_existing():
     """Load existing CSV to preserve sentiment scores we already fetched."""
     if os.path.exists(DATA_PATH):
-        return pd.read_csv(DATA_PATH).set_index("title")
+        # We drop duplicates on load to ensure 'title' remains a safe index
+        return pd.read_csv(DATA_PATH).drop_duplicates(subset="title").set_index("title")
     return pd.DataFrame()
 
 def run():
@@ -25,35 +26,28 @@ def run():
         print(f"  [{i+1}/{len(movies_raw)}] Processing: {title}")
 
         # ── Reuse existing YouTube sentiment if already scored ────────────────
-        # 1. Get the data from the index
-        prev = existing.loc[title] if title in existing.index else None
-        
         already_has_sentiment = False
-        
-        # 2. Check if we actually found something without using 'is not None' on the object
-        already_has_sentiment = False
-        
+        yt_sentiment = {}
+
         if title in existing.index:
-            prev = existing.loc[title]
-            # Handle duplicate titles by taking the first row
-            target_row = prev.iloc[0] if isinstance(prev, pd.DataFrame) else prev
+            prev_data = existing.loc[title]
+            # Handle duplicate titles just in case
+            target_row = prev_data.iloc[0] if isinstance(prev_data, pd.DataFrame) else prev_data
             
             has_pos = pd.notna(target_row.get("audience_positive"))
             has_samples = int(target_row.get("audience_samples", 0)) > 0
             
             if has_pos and has_samples:
                 already_has_sentiment = True
-                prev = target_row 
+                print(f"    ↩ Using cached sentiment ({int(target_row['audience_samples'])} samples)")
+                yt_sentiment = {
+                    "positive_pct":  target_row["audience_positive"],
+                    "avg_polarity":  target_row.get("audience_polarity"),
+                    "sample_size":   int(target_row["audience_samples"])
+                }
 
-        if already_has_sentiment:
-            print(f"    ↩ Using cached sentiment ({int(prev['audience_samples'])} samples)")
-            yt_sentiment = {
-                "positive_pct":  prev["audience_positive"],
-                "avg_polarity":  prev.get("audience_polarity"),
-                "sample_size":   int(prev["audience_samples"])
-            }
-    
-        else:
+        # If not cached, fetch from YouTube
+        if not already_has_sentiment:
             vid_id    = find_trailer(title, year)
             yt_comments = get_trailer_comments(vid_id) if vid_id else []
             yt_sentiment = score_sentiment([c["text"] for c in yt_comments])
