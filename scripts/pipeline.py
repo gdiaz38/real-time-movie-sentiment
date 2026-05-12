@@ -26,11 +26,18 @@ def run():
 
         # ── Reuse existing YouTube sentiment if already scored ────────────────
         prev = existing.loc[title] if title in existing.index else None
-        already_has_sentiment = (
-            prev is not None
-            and pd.notna(prev.get("audience_positive"))
-            and int(prev.get("audience_samples", 0)) > 0
-        )
+        
+        already_has_sentiment = False
+        if prev is not None:
+            # Handle potential duplicate titles returning a DataFrame
+            target_row = prev.iloc[0] if isinstance(prev, pd.DataFrame) else prev
+            
+            already_has_sentiment = (
+                pd.notna(target_row.get("audience_positive"))
+                and int(target_row.get("audience_samples", 0)) > 0
+            )
+            # Re-assign prev to the single row for the cached logic below
+            prev = target_row
 
         if already_has_sentiment:
             print(f"    ↩ Using cached sentiment ({int(prev['audience_samples'])} samples)")
